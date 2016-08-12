@@ -1,3 +1,23 @@
+/*This software is a work in progress. It is a console interface designed 
+to operate the BLAST-TNG ROACH2 firmware. 
+
+Copyright (C) May 23, 2016  Gordon, Sam <sbgordo1@asu.edu>
+Author: Gordon, Sam <sbgordo1@asu.edu>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdint.h>
@@ -207,28 +227,29 @@ int roach_upload_fpg(roach_state_t *m_roach, const char *m_filename)
                               .timeout.tv_usec = 0,
 			      .roach = m_roach
     	};
-
-    	printf("Getting permission to upload fpg on port 3000...");
+    	printf("Getting permission to upload fpg...\n");
     	int retval = send_rpc_katcl(m_roach->rpc_conn, QDR_TIMEOUT,
                        KATCP_FLAG_FIRST | KATCP_FLAG_STRING, "?progremote",
                        KATCP_FLAG_ULONG | KATCP_FLAG_LAST, state.port,
                        NULL);
-    
     	if (retval != KATCP_RESULT_OK) {
         return -1;
 	printf("Failed\n");
-    
     	}
-    	printf("Done\n");
-    	printf("Uploading fpg through netcat...\t");
+    	printf("Uploading fpg through netcat...\n");
     	asprintf(&upload_command, "nc -w 2 %s %u < %s", m_roach->address, state.port, test_fpg);
     	int status = system(upload_command);
-    	printf("Done\n");
-    	/*while (state.result == ROACH_UPLOAD_RESULT_WORKING) {
-       	 	usleep(1000);
-    	}
-    	if (state.result != ROACH_UPLOAD_RESULT_SUCCESS) return -1;
-    	return 0;*/
+    	sleep(2);
+	int success_val = send_rpc_katcl(m_roach->rpc_conn, 1000,
+                KATCP_FLAG_FIRST | KATCP_FLAG_STRING, "?fpgastatus", 
+		KATCP_FLAG_LAST | KATCP_FLAG_STRING, "",
+		NULL);
+    	while (success_val != KATCP_RESULT_OK) {
+		usleep(1000);
+	}
+        char *ret = arg_string_katcl(m_roach->rpc_conn, 1);
+	printf("FPGA programmed %s\n", ret);
+	return 0;
 }
 
 static void roach_init_LUT(roach_state_t *m_roach, size_t m_len)
@@ -861,7 +882,7 @@ int main(void)
         {
         	case '0':
 			roach_upload_fpg(&roach2, test_fpg);
-                     	isRunning = false;
+			//isRunning = false;
 			break;
 		case '1':
 			init_roach(&roach2);
