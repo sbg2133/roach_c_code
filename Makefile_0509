@@ -1,9 +1,0 @@
-CC=gcc
-CFLAGS=-std=gnu99 -lm -g -L/usr/lib/python2.7/ -L/usr/lib -lpthread -ldl  -lutil -lm  -lpython2.7 -Xlinker -export-dynamic -Wl,-O1 -Wl,-Bsymbolic-functions -lkatcp  -lfftw3 -I./katcp_devel/katcp/ -L./katcp_devel/katcp  -I../flight/mcp/include/ -I../flight/common/include/ -L../flight/common/ 
-
-0509: 0509.c
-	$(CC) -o 0509 0509.c $(CFLAGS)
-	
-clean:
-	rm 0509
-

@@ -43,10 +43,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <time.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include "netc.h"
 #include <fftw3.h>
 //#include "crc.h"
 //#include "portable_endian.h"
+#include "netc.h"
 #include "katcp.h"
 #include "katcl.h"
 
@@ -61,7 +61,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 static int fft_len = 1024;
 static double accum_len = ( 1 << 19 ) - 1;
-const char test_fpg[] = "./fpgs/roach2_8tap_wide_2016_Jun_25_2016.fpg";
+const char test_fpg[] = "./roach2_8tap_wide_2016_Jun_25_2016.fpg";
+double test_freq[] = {50.0125e6};
 
 typedef enum {
     ROACH_STATUS_BOOT,
@@ -103,6 +104,7 @@ typedef struct roach_state {
 	size_t freqlen;
 	double *kid_freqs;
 	size_t num_kids;
+	double *test_freq;
 	roach_lut_t DDS;
 	roach_lut_t DAC;
 	roach_uint16_lut_t LUT;
@@ -153,9 +155,8 @@ int roach_read_data(roach_state_t *m_roach, uint8_t *m_dest, const char *m_regis
                    KATCP_FLAG_ULONG | KATCP_FLAG_LAST, m_size,
                    NULL);
 
-    printf("read_data retval: %d\n", retval);
     if (retval < 0) {
-        return -1;
+	return -1;
     }
     if (retval > 0) {
         char *ret = arg_string_katcl(m_roach->rpc_conn, 1);
@@ -185,11 +186,8 @@ int roach_read_int(roach_state_t *m_roach, const char *m_register)
   	uint32_t m_data;
 	roach_read_data(m_roach, (uint8_t*) &m_data, m_register, 
 						0, sizeof(m_data), 100);
-	//printf("past read_data\n");
 	m_data = ntohl(m_data);
-
-	printf("%u\n", m_data);
-	return 0;
+	return m_data;
 }
 
 static void roach_buffer_ntohs(uint16_t *m_buffer, size_t m_len)
@@ -482,7 +480,6 @@ void roach_write_QDR(roach_state_t *m_roach, double *m_freqs, size_t m_freqlen)
 	roach_write_int(m_roach, "start_dac", 0, 0);
 	if (roach_write_data(m_roach, "qdr0_memory", (uint8_t*)m_roach->LUT.I, m_roach->LUT.len * sizeof(uint16_t), 0, 20000) < 0) { printf("Could not write to qdr0!");}
 	roach_write_data(m_roach, "qdr1_memory", (uint8_t*)m_roach->LUT.Q, m_roach->LUT.len * sizeof(uint16_t), 0, 20000);
-	sleep(0.3);
 	roach_write_int(m_roach, "start_dac", 1, 0);
 	roach_write_int(m_roach, "sync_accum_reset", 0, 0);
 	roach_write_int(m_roach, "sync_accum_reset", 1, 0);
@@ -836,29 +833,53 @@ void get_kid_freqs(roach_state_t *m_roach, const char *m_packetpath)
 
 void init_roach(roach_state_t *m_roach)
 {
-	uint32_t dest_ip = 192*pow(2,24) + 168*pow(2,16) + 41*pow(2,8) + 2;
-    	srand48(time(NULL));
-        m_roach->port = (uint16_t) (drand48() * 500.0 + 50000),
-	printf("%u\n", m_roach->port);
-	/* Set software registers */
-	roach_write_int(m_roach, "dds_shift", 305, 0);	/* DDS LUT shift, in clock cycles */
-	roach_write_int(m_roach, "fft_shift", 255, 0);	/* FFT shift schedule */
-	roach_write_int(m_roach, "sync_accum_len", 524287, 0); /* Number of accumulations */
-	roach_write_int(m_roach, "tx_destip", dest_ip, 0);		/* UDP destination IP */
-	roach_write_int(m_roach, "tx_destport", m_roach->port, 0);		/* UDP port */
-	roach_write_int(m_roach, "pps_start", 1, 0);
-	roach_read_int(m_roach, "dds_shift");
-	//uint16_t *m_qdr_I = calloc(sizeof(uint16_t), 1<<22);
-	//uint16_t *m_qdr_Q = calloc(sizeof(uint16_t), 1<<22);
-	printf("Initializing UDP socket...\n");	
-	//m_roach->udp_sock = init_socket(m_roach);
+	printf("Setting Valon... ");	
+	system ("python ./python_embed/set_valon.py");
 	printf("Done\n");	
+	uint32_t dest_ip = 192*pow(2,24) + 168*pow(2,16) + 41*pow(2,8) + 2;
+	uint16_t udp_port = 60001;
+    	//srand48(time(NULL));
+        //m_roach->port = (uint16_t) (drand48() * 500.0 + 50000),
+	//printf("%u\n", m_roach->port);
+	/* Set software registers */
+	printf("Setting software registers to default values...\n");
+	roach_write_int(m_roach, "tx_destport", udp_port, 0);		/* UDP port */
+	uint16_t port = roach_read_int(m_roach, "tx_destport");
+	printf("udp port = %u\n", port); 
+	roach_write_int(m_roach, "dds_shift", 305, 0);	/* DDS LUT shift, in clock cycles */
+	int dds_shift = roach_read_int(m_roach, "dds_shift");
+	printf("dds shift = %u\n", dds_shift); 
+	roach_write_int(m_roach, "fft_shift", 255, 0);	/* FFT shift schedule */
+	int fft_shift = roach_read_int(m_roach, "fft_shift");
+	printf("fft shift = %u\n", fft_shift); 
+	roach_write_int(m_roach, "sync_accum_len", 524287, 0); /* Number of accumulations */
+	int sync_accum_len = roach_read_int(m_roach, "sync_accum_len");
+	printf("accumulation length = %u\n", sync_accum_len); 
+	roach_write_int(m_roach, "tx_destip", dest_ip, 0);		/* UDP destination IP */
+	int udp_ip = roach_read_int(m_roach, "tx_destip");
+	struct in_addr ip_addr;
+    	ip_addr.s_addr = ntohl(udp_ip);
+	printf("udp ip = %s\n", inet_ntoa(ip_addr)); 
+	roach_write_int(m_roach, "pps_start", 1, 0);
+	roach_write_int(m_roach, "dac_reset", 1, 0);
+	printf("Calling Python script to calibrate QDR...\n");
+	system ("python ./python_embed/cal_roach_qdr.py");
+	printf("Done\n");	
+	roach_write_int(m_roach, "tx_rst", 0, 0);	/* perform only once per fpg upload */
+	roach_write_int(m_roach, "tx_rst", 1, 0);
+	roach_write_int(m_roach, "tx_rst", 0, 0);
+	//printf("Initializing UDP socket... ");	
+	//m_roach->udp_sock = init_socket(m_roach);
+	//printf("Done\n");	
 }
 
 int main(void)
 {	
 	roach_state_t roach2;  
-	roach2.address = "192.168.40.52";
+	printf("Initializing UDP socket... ");	
+	roach2.udp_sock = init_socket(&roach2);
+	printf("Done\n");	
+	roach2.address = "192.168.40.89";
 	int fd;
 	fd = net_connect(roach2.address, 0, NETC_VERBOSE_ERRORS | NETC_VERBOSE_STATS);
 	roach2.rpc_conn = create_katcl(fd);
@@ -886,21 +907,11 @@ int main(void)
 			break;
 		case '1':
 			init_roach(&roach2);
-			printf("Setting Valon...\n");	
-			system ("python ./python_embed/set_valon.py");
-			printf("Done\n");	
-			roach_write_int(&roach2, "dac_reset", 1, 0);
-			printf("Calling Python script to calibrate QDR...\n");
-			system ("python ./python_embed/cal_roach_qdr.py");
-			printf("Done\n");	
-			roach_write_int(&roach2, "tx_rst", 0, 0);	/* perform only once per fpg upload */
-			roach_write_int(&roach2, "tx_rst", 1, 0);
-			roach_write_int(&roach2, "tx_rst", 0, 0);
-			roach_write_int(&roach2, "pps_start", 1, 0);
 			break;
 		case '2':
 			roach_freq_comb(&roach2);
-			roach_write_tones(&roach2, roach2.freq_comb, roach2.freqlen);	
+			//roach_write_tones(&roach2, roach2.freq_comb, roach2.freqlen);	
+			roach_write_tones(&roach2, test_freq, 1);
 			//roach_read_QDR(&roach2, m_qdr_I, m_qdr_Q);
 			//printf("%u\t%u\n", m_qdr_I[0], m_qdr_Q[0]);
 			//save_packed_luts(&roach2);
@@ -912,7 +923,7 @@ int main(void)
 			break;
 		case '4':
 			roach2.num_kids = 273;
-			get_kid_freqs(&roach2, "./iqstream/r2/vna/test");
+			get_kid_freqs(&roach2, "/home/muchacho/olimpo_readout/sweeps/vna/0804_2");
 			break;
 		case '5': 
 			roach2.targ_path = "./iqstream/r2/targ";

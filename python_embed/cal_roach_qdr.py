@@ -3,7 +3,7 @@ from myQdr import Qdr as myQdr
 
 def qdrCal():    
 	time.sleep(2)
-	fpga = casperfpga.katcp_fpga.KatcpFpga("192.168.40.52",timeout=120.)
+	fpga = casperfpga.katcp_fpga.KatcpFpga("192.168.40.89",timeout=120.)
 	bFailHard = False
 	calVerbosity = 1
 	qdrMemName = 'qdr0_memory'

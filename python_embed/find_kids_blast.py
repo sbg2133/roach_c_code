@@ -1,42 +1,34 @@
 import numpy as np
-import os, sys
+import sys, os
 import matplotlib.pyplot as plt
+import scipy.ndimage
 
-bb_freqs, freq_step = np.linspace(-250.0e6, 250.0e6, 1000, retstep = True)
+
 path = sys.argv[1]
-
+accum_len = 2**21
 def openStored(path):
-	
 	files = sorted(os.listdir(path))
-	lo_freqs = np.sort(np.array([np.float(fname[1:-4]) for fname in files]))
-	chan_I = np.zeros((len(lo_freqs),len(bb_freqs)))
-	chan_Q = np.zeros((len(lo_freqs),len(bb_freqs)))
-	
-	for i in range(len(files)):
-		I, Q = np.loadtxt(os.path.join(path,fname), dtype = "float", delimiter = ",", usecols = (1,2), unpack = True, skiprows = 17) 
-		I, Q = I[:len(bb_freqs)], Q[:len(bb_freqs)]
-		chan_I[i] = I
-		chan_Q[i] = Q
-		
-	return lo_freqs, chan_I, chan_Q
+	I_list = [os.path.join(path, filename) for filename in files if filename.startswith('I')]
+	Q_list = [os.path.join(path, filename) for filename in files if filename.startswith('Q')]
+	chan_I = np.array([np.load(filename) for filename in I_list])
+	chan_Q = np.array([np.load(filename) for filename in Q_list])
+	return chan_I, chan_Q
 
-def filter_trace():
-	lo_freqs, chan_I, chan_Q = openStored(path)
-	channels = xrange(np.shape(chan_I)[1])
-	sorted_freqs = np.zeros((len(channels),len(lo_freqs)))
-	rf_freqs = np.sort(bb_freqs + 750.0e6)
+def filter_trace(path, bb_freqs, lo_freqs):
+	chan_I, chan_Q = openStored(path)
+	channels = np.arange(np.shape(chan_I)[1])
 	mag = np.zeros((len(channels),len(lo_freqs)))
 	chan_freqs = np.zeros((len(channels),len(lo_freqs)))
 	for chan in channels:
-		mag[chan] = 20*np.log10(np.sqrt(chan_I[:,chan]**2 + chan_Q[:,chan]**2)) 
-		chan_freqs[chan] = np.sort(lo_freqs + bb_freqs[chan])
-	for chan in channels:
-		if chan > 1:
-			end_piece = mag[chan - 1][-1]
-			offset = mag[chan][0] - end_piece
-			mag[chan] = mag[chan] - offset
+		mag[chan] = (np.sqrt(chan_I[:,chan]**2 + chan_Q[:,chan]**2)) 
+		chan_freqs[chan] = (lo_freqs + bb_freqs[chan])/1.0e6
+	mag = np.concatenate((mag[len(mag)/2:], mag[:len(mag)/2]))
 	mags = np.hstack(mag)
+	mags /= (2**17)
+	mags /= (accum_len/ 512)
+	mags = 20*np.log10(mags)
 	chan_freqs = np.hstack(chan_freqs)
+	chan_freqs = np.concatenate((chan_freqs[len(chan_freqs)/2:],chan_freqs[:len(chan_freqs)/2]))
 	return chan_freqs, mags
 
 def lowpass_cosine( y, tau, f_3db, width, padd_data=True):
@@ -93,50 +85,52 @@ def lowpass_cosine( y, tau, f_3db, width, padd_data=True):
 	# return the filtered data
         return filtered
 	
+def main(path):
+	bb_freqs = np.load(os.path.join(path,'bb_freqs.npy'))
+	lo_freqs = np.load(os.path.join(path,'sweep_freqs.npy'))
+	
+	sweep_step = 2.5 # kHz
+	smoothing_scale = 100000.0 # kHz
+	peak_threshold = 5. # mag units
+	spacing_threshold = 1000.0 # kHz
 
-sweep_step = 5.0 # kHz
-smoothing_scale = 1500.0 # kHz
-peak_threshold = 0.4 # mag units
-spacing_threshold = 50.0 # kHz
+	chan_freqs,mags = filter_trace(path, bb_freqs, lo_freqs)
+	filtermags = lowpass_cosine( mags, sweep_step, 1./smoothing_scale, 0.1 * (1.0/smoothing_scale))
+	#plotting 
+	plt.ion()
+	plt.figure(1)
+	plt.clf()
+	plt.plot(chan_freqs,mags,'b',label='#nofilter')
+	plt.plot(chan_freqs,filtermags,'g',label='Filtered')
+	plt.xlabel('frequency (MHz)')
+	plt.ylabel('dB')
+	plt.legend()
 
-chan_freqs,mags = filter_trace()
-filtermags = lowpass_cosine( mags, sweep_step, 1./smoothing_scale, 0.1 * (1.0/smoothing_scale))
+	plt.figure(2)
+	plt.clf()
+	plt.plot(chan_freqs,mags-filtermags,'b')
+	ilo = np.where( (mags-filtermags) < -1.0*peak_threshold)[0]
+	plt.plot(chan_freqs[ilo],mags[ilo]-filtermags[ilo],'r*')
+	plt.xlabel('frequency (MHz)')
 
-plt.ion()
-plt.figure(1)
-plt.clf()
-plt.plot(chan_freqs,mags,'b',label='#nofilter')
-plt.plot(chan_freqs,filtermags,'g',label='Filtered')
-plt.legend()
-
-plt.figure(2)
-plt.clf()
-plt.plot(chan_freqs,mags-filtermags,'b')
-ilo = np.where( (mags-filtermags) < -1.0*peak_threshold)[0]
-plt.plot(chan_freqs[ilo],mags[ilo]-filtermags[ilo],'r*')
-
-edges = np.where(np.diff(ilo) > (spacing_threshold/sweep_step))[0]
-edges = np.append(np.array([0]),edges)
-centers = np.round((edges[0:-2] + edges[1:-1])/2.0).astype('int')
-ind_kids = ilo[centers]
-
-# find actual peaks near these centers
-for i in xrange(len(ind_kids)):
-	# get some data nearby
-	num = np.round((spacing_threshold/sweep_step)/2.0).astype('int')
-	nearby = (mags-filtermags)[(ind_kids[i]-num):(ind_kids[i]+num)]
-	ihi = np.where(np.abs(nearby) == np.max(np.abs(nearby)))[0] - num
-	ind_kids[i] = ind_kids[i] + ihi
-
-print len(edges)
-
-plt.figure(4)
-plt.clf()
-plt.plot(chan_freqs,mags,'g')
-plt.plot(chan_freqs[ind_kids],mags[ind_kids],'r*')
-
-# list of kid frequencies
-target_freqs = chan_freqs[ind_kids]
-targ_bb_freqs = target_freqs - 750.0e6
-targ_bb_freqs = np.roll(targ_bb_freqs, - np.argmin(np.abs(targ_bb_freqs)) - 1)
-np.savetxt('kid_freqs.dat', targ_bb_freqs, fmt='%f') 
+	iup = np.where( (mags-filtermags) > -1.0*peak_threshold)[0]
+	new_mags = mags - filtermags
+	new_mags[iup] = 0
+	labeled_image, num_objects = scipy.ndimage.label(new_mags)
+	indices = scipy.ndimage.measurements.minimum_position(new_mags,labeled_image,np.arange(num_objects)+1)
+	kid_idx = np.array(indices, dtype = 'int')
+	plt.figure(4)
+	plt.clf()
+	plt.plot(chan_freqs, mags,'b')
+	plt.plot(chan_freqs[kid_idx], mags[kid_idx], 'r*')
+	plt.xlabel('frequency (MHz)')
+	plt.ylabel('dB')
+	# list of kid frequencies
+	target_freqs = chan_freqs[kid_idx]
+	print len(target_freqs), "pixels found"
+	print "Freqs =", chan_freqs[kid_idx]
+	prompt = raw_input('Save target freqs in ' + path + ' (y/n) (may overwrite) ? ')
+	if prompt == 'y':
+		np.save(path + '/target_freqs.npy', chan_freqs[kid_idx])
+	return
+main(path)	
