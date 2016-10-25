@@ -633,8 +633,8 @@ void parse_packet(data_packet_t *m_packet)
 			j = 1024*4 + (((i*4) - 1) / 2) - 1;
 			k = 1536*4 + (((i*4) - 1) / 2) - 1;
 		}
-		m_packet->I[i] = (float)(ntohl((data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3])));
-		m_packet->Q[i] = (float)(ntohl((data[k] << 24) | (data[k + 1] << 16) | (data[k + 2] << 8) | (data[k + 3])));
+		m_packet->I[i] = (float)(int32_t)(ntohl((data[j] << 24) | (data[j + 1] << 16) | (data[j + 2] << 8) | (data[j + 3])));
+		m_packet->Q[i] = (float)(int32_t)(ntohl((data[k] << 24) | (data[k + 1] << 16) | (data[k + 2] << 8) | (data[k + 3])));
 		//printf("%d\t %d\t %d\t %d\t %d\t\n", i, j, j + 1, j + 2, j + 3);
 		//printf("%d\t %d\t %d\t %d\t %d\t\n", i, k, k + 1, k + 2, k + 3);
 	}
@@ -650,7 +650,7 @@ int stream_packets(roach_state_t *m_roach, size_t m_num_packets, int m_chan)
 		printf("%u\t", m_packet.packet_count); 	
 		printf("%d\t", m_chan);
 		printf("%f\t%f\t", m_packet.I[m_chan], m_packet.Q[m_chan]);
-		double chan_phase = atan2( (double)m_packet.Q[m_chan], (double)m_packet.I[m_chan]); 
+		float chan_phase = atan2( m_packet.Q[m_chan], m_packet.I[m_chan]); 
 		printf("%g\t\n", chan_phase);	
 		free(m_packet.I);
 		free(m_packet.Q);
@@ -709,11 +709,11 @@ void save_packets(roach_state_t *m_roach, size_t m_num_packets, double m_filetag
 
 void roach_freq_comb(roach_state_t *m_roach)
 {
-	size_t m_freqlen = 300;
-	double p_max_freq = 255.021234e6;
-	double p_min_freq = 5.2342e6;
-	double n_max_freq = -5.2342e6+5.0e4;
-	double n_min_freq = -255.021234e6+5.0e4;
+	size_t m_freqlen = 100;
+	double p_max_freq = 245.001234e6;
+	double p_min_freq = 10.02342e6;
+	double n_max_freq = -10.02342e6;
+	double n_min_freq = -245.001234e6+5.1123e4;
 	m_roach->freq_comb = calloc(m_freqlen, sizeof(double));
 	m_roach->freqlen = m_freqlen;
 	/* positive freqs */
@@ -722,6 +722,7 @@ void roach_freq_comb(roach_state_t *m_roach)
 	printf("p delta f: %0.9g\n", p_delta_f);
 	for (size_t i = m_freqlen/2; i-- > 0;) {
 		m_roach->freq_comb[m_freqlen/2 - (i + 1)] = p_max_freq - i*p_delta_f;
+		printf("%g\n",m_roach->freq_comb[m_freqlen/2 - (i + 1)]);
 	}
 	/* negative freqs */
 	printf("n freqs: %0.9g, %0.9g\n", n_max_freq/1.0e6, n_min_freq/1.0e6);
@@ -729,8 +730,7 @@ void roach_freq_comb(roach_state_t *m_roach)
 	printf("n delta f: %0.9g\n", n_delta_f);
 	for (size_t i = 0; i < m_freqlen/2; i++) {
 		m_roach->freq_comb[i + m_freqlen/2] = n_min_freq + i*n_delta_f;
-	}
-	for (size_t i = 0; i < m_freqlen; i++) {
+		printf("%g\n",m_roach->freq_comb[i + m_freqlen/2]);
 	}
 }
 
@@ -910,8 +910,8 @@ int main(void)
 			break;
 		case '2':
 			roach_freq_comb(&roach2);
-			//roach_write_tones(&roach2, roach2.freq_comb, roach2.freqlen);	
-			roach_write_tones(&roach2, test_freq, 1);
+			roach_write_tones(&roach2, roach2.freq_comb, roach2.freqlen);	
+			//roach_write_tones(&roach2, test_freq, 1);
 			//roach_read_QDR(&roach2, m_qdr_I, m_qdr_Q);
 			//printf("%u\t%u\n", m_qdr_I[0], m_qdr_Q[0]);
 			//save_packed_luts(&roach2);
